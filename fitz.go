@@ -5,6 +5,7 @@ package fitz
 /*
 #include <mupdf/fitz.h>
 #include <stdlib.h>
+#include "fitz_stream.h"
 
 const char *fz_version = FZ_VERSION;
 */
@@ -14,7 +15,6 @@ import (
 	"errors"
 	"image"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sync"
@@ -70,7 +70,7 @@ func New(filename string) (f *Document, err error) {
 		return
 	}
 
-	f.ctx = (*C.struct_fz_context)(unsafe.Pointer(C.fz_new_context_imp(nil, nil, C.FZ_STORE_UNLIMITED, C.fz_version)))
+	f.ctx = (*C.struct_fz_context)(unsafe.Pointer(C.fz_new_context_imp(nil, nil, C.FZ_STORE_DEFAULT, C.fz_version)))
 	if f.ctx == nil {
 		err = ErrCreateContext
 		return
@@ -99,7 +99,7 @@ func New(filename string) (f *Document, err error) {
 func NewFromMemory(b []byte) (f *Document, err error) {
 	f = &Document{}
 
-	f.ctx = (*C.struct_fz_context)(unsafe.Pointer(C.fz_new_context_imp(nil, nil, C.FZ_STORE_UNLIMITED, C.fz_version)))
+	f.ctx = (*C.struct_fz_context)(unsafe.Pointer(C.fz_new_context_imp(nil, nil, C.FZ_STORE_DEFAULT, C.fz_version)))
 	if f.ctx == nil {
 		err = ErrCreateContext
 		return
@@ -132,14 +132,41 @@ func NewFromMemory(b []byte) (f *Document, err error) {
 }
 
 // NewFromReader returns new fitz document from io.Reader.
-func NewFromReader(r io.Reader) (f *Document, err error) {
-	b, e := ioutil.ReadAll(r)
-	if e != nil {
-		err = e
+func NewFromReader(r io.Reader, mimeType string) (f *Document, err error) {
+	f = &Document{}
+
+	f.ctx = (*C.struct_fz_context)(unsafe.Pointer(C.fz_new_context_imp(nil, nil, C.FZ_STORE_DEFAULT, C.fz_version)))
+	if f.ctx == nil {
+		err = ErrCreateContext
 		return
 	}
 
-	f, err = NewFromMemory(b)
+	C.fz_register_document_handlers(f.ctx)
+
+	key := reg.register(r)
+	state := C.fz_new_reader_state(f.ctx, C.int(key))
+	defer reg.unregister(key)
+
+	f.stream = C.fz_new_stream(f.ctx, unsafe.Pointer(state), (*C.fz_stream_next_fn)(unsafe.Pointer(C.next_reader)), nil)
+
+	if f.stream == nil {
+		err = ErrOpenMemory
+		return
+	}
+
+	cmagic := C.CString(mimeType)
+	defer C.free(unsafe.Pointer(cmagic))
+
+	f.doc = C.fz_open_document_with_stream(f.ctx, cmagic, f.stream)
+	if f.doc == nil {
+		err = ErrOpenDocument
+	}
+
+	ret := C.fz_needs_password(f.ctx, f.doc)
+	v := bool(int(ret) != 0)
+	if v {
+		err = ErrNeedsPassword
+	}
 
 	return
 }
@@ -450,12 +477,12 @@ func (f *Document) Metadata() map[string]string {
 
 // Close closes the underlying fitz document.
 func (f *Document) Close() error {
-	C.fz_drop_document(f.ctx, f.doc)
-	C.fz_drop_context(f.ctx)
-
 	if f.stream != nil {
 		C.fz_drop_stream(f.ctx, f.stream)
 	}
+
+	C.fz_drop_document(f.ctx, f.doc)
+	C.fz_drop_context(f.ctx)
 
 	return nil
 }
