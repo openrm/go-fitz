@@ -34,6 +34,12 @@ var (
 	ErrLoadOutline   = errors.New("fitz: cannot load outline")
 )
 
+// Cache limits.
+const (
+	StoreUnlimited = C.FZ_STORE_UNLIMITED
+	StoreDefault = C.FZ_STORE_DEFAULT
+)
+
 // Document represents fitz document.
 type Document struct {
 	ctx *C.struct_fz_context
@@ -58,6 +64,11 @@ type Outline struct {
 
 // New returns new fitz document.
 func New(filename string) (f *Document, err error) {
+	return NewWithStoreLimit(filename, StoreUnlimited)
+}
+
+// NewWithStoreLimit returns new fitz document with limit in the size of the resource store.
+func NewWithStoreLimit(filename string, maxStore uint64) (f *Document, err error) {
 	f = &Document{}
 
 	filename, err = filepath.Abs(filename)
@@ -70,7 +81,7 @@ func New(filename string) (f *Document, err error) {
 		return
 	}
 
-	f.ctx = (*C.struct_fz_context)(unsafe.Pointer(C.fz_new_context_imp(nil, nil, C.FZ_STORE_UNLIMITED, C.fz_version)))
+	f.ctx = (*C.struct_fz_context)(unsafe.Pointer(C.fz_new_context_imp(nil, nil, C.ulong(maxStore), C.fz_version)))
 	if f.ctx == nil {
 		err = ErrCreateContext
 		return
@@ -97,9 +108,14 @@ func New(filename string) (f *Document, err error) {
 
 // NewFromMemory returns new fitz document from byte slice.
 func NewFromMemory(b []byte) (f *Document, err error) {
+	return NewFromMemoryWithStoreLimit(b, StoreUnlimited)
+}
+
+// NewFromMemory returns new fitz document from byte slice with limit in the size of the resource store.
+func NewFromMemoryWithStoreLimit(b []byte, maxStore uint64) (f *Document, err error) {
 	f = &Document{}
 
-	f.ctx = (*C.struct_fz_context)(unsafe.Pointer(C.fz_new_context_imp(nil, nil, C.FZ_STORE_UNLIMITED, C.fz_version)))
+	f.ctx = (*C.struct_fz_context)(unsafe.Pointer(C.fz_new_context_imp(nil, nil, C.ulong(maxStore), C.fz_version)))
 	if f.ctx == nil {
 		err = ErrCreateContext
 		return
@@ -133,13 +149,18 @@ func NewFromMemory(b []byte) (f *Document, err error) {
 
 // NewFromReader returns new fitz document from io.Reader.
 func NewFromReader(r io.Reader) (f *Document, err error) {
+	return NewFromReaderWithStoreLimit(r, StoreUnlimited)
+}
+
+// NewFromReader returns new fitz document from io.Reader with limit in the size of the resource store.
+func NewFromReaderWithStoreLimit(r io.Reader, maxStore uint64) (f *Document, err error) {
 	b, e := ioutil.ReadAll(r)
 	if e != nil {
 		err = e
 		return
 	}
 
-	f, err = NewFromMemory(b)
+	f, err = NewFromMemoryWithStoreLimit(b, maxStore)
 
 	return
 }
